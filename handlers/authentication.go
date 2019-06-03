@@ -140,6 +140,45 @@ func performKialiAuthentication(w http.ResponseWriter, r *http.Request) bool {
 	return true
 }
 
+func performLDAPAuthentication(w http.ResponseWriter, r *http.Request) bool {
+	// Check if user is already logged in
+	// TODO: Validate LDAP token
+	log.Debugf("performLDAPAuthentication start")
+	defer log.Debugf("performLDAPAuthentication End")
+	if oldToken := getTokenStringFromRequest(r); len(oldToken) == 0 {
+		log.Debugf("performLDAPAuthentication - No token in request")
+		user, pwd, ok := r.BasicAuth()
+		log.Debugf("performLDAPAuthentication - BasicAuth (%v, %v, %v)", user, pwd, ok)
+		if ok {
+			if user != "test1" && pwd != "test1" {
+				RespondWithCode(w, http.StatusUnauthorized)
+				return false
+			}
+		}
+	}
+
+	user := "ldap-user"
+
+	// If user is already logged in, skip credential
+	// validation and just send a new JWT to extend
+	// the session of the user.
+	// TODO: Authenticate credentials
+
+	token := config.TokenGenerated{Token: "ldap-token", ExpiresOn: time.Now().Add(1 * time.Hour), Username: user}
+
+	tokenCookie := http.Cookie{
+		Name:     config.TokenCookieName,
+		Value:    token.Token,
+		Expires:  token.ExpiresOn,
+		HttpOnly: true,
+		// SameSite: http.SameSiteStrictMode, ** Commented out because unsupported in go < 1.11
+	}
+	http.SetCookie(w, &tokenCookie)
+
+	RespondWithJSONIndent(w, http.StatusOK, TokenResponse{Token: token.Token, ExpiresOn: token.ExpiresOn.Format(time.RFC1123Z), Username: user})
+	return true
+}
+
 func performOpenshiftAuthentication(w http.ResponseWriter, r *http.Request) bool {
 	err := r.ParseForm()
 
@@ -282,6 +321,36 @@ func checkKialiSession(w http.ResponseWriter, r *http.Request) int {
 	return http.StatusOK
 }
 
+func checkLDAPSession(w http.ResponseWriter, r *http.Request) (int, string) {
+	log.Debugf("checkLDAPSession Start")
+	defer log.Debugf("checkLDAPSession End")
+	/* TODO: Validate token
+	if token := getTokenStringFromRequest(r); len(token) > 0 {
+		user, err := config.ValidateToken(token)
+
+		if err != nil {
+			log.Warning("Token error: ", err)
+			return http.StatusUnauthorized, ""
+		}
+
+		// Internal header used to propagate the subject of the request for audit purposes
+		r.Header.Add("Kiali-User", user)
+
+		return http.StatusOK, token
+	}
+	*/
+
+	user := "ldap-user"
+	if token := getTokenStringFromRequest(r); len(token) > 0 {
+		log.Debugf("checkLDAPSession token=%v", token)
+		r.Header.Add("Kiali-User", user)
+		return http.StatusOK, token
+	}
+	// TODO: Add LDAP Authentication code
+
+	return http.StatusUnauthorized, ""
+}
+
 func writeAuthenticateHeader(w http.ResponseWriter, r *http.Request) {
 	// If header exists return the value, must be 1 to use the API from Kiali
 	// Otherwise an empty string is returned and WWW-Authenticate will be Basic
@@ -314,6 +383,8 @@ func (aHandler AuthenticationHandler) Handle(next http.Handler) http.Handler {
 		case config.AuthStrategyLogin:
 			statusCode = checkKialiSession(w, r)
 			token = aHandler.saToken
+		case config.AuthStrategyLDAP:
+			statusCode, token = checkLDAPSession(w, r)
 		case config.AuthStrategyAnonymous:
 			log.Trace("Access to the server endpoint is not secured with credentials - letting request come in")
 			token = aHandler.saToken
@@ -351,6 +422,10 @@ func Authenticate(w http.ResponseWriter, r *http.Request) {
 		performOpenshiftAuthentication(w, r)
 	case config.AuthStrategyLogin:
 		if !performKialiAuthentication(w, r) {
+			writeAuthenticateHeader(w, r)
+		}
+	case config.AuthStrategyLDAP:
+		if !performLDAPAuthentication(w, r) {
 			writeAuthenticateHeader(w, r)
 		}
 	case config.AuthStrategyAnonymous:
@@ -391,6 +466,8 @@ func AuthenticationInfo(w http.ResponseWriter, r *http.Request) {
 		if conf.Server.Credentials.Username == "" && conf.Server.Credentials.Passphrase == "" {
 			response.SecretMissing = true
 		}
+	case config.AuthStrategyLDAP:
+		// TODO:
 	}
 
 	token := getTokenStringFromRequest(r)
@@ -420,8 +497,12 @@ func Logout(w http.ResponseWriter, r *http.Request) {
 
 	// We need to perform an extra step to invalidate the user token when using OpenShift OAuth
 	conf := config.Get()
-	if conf.Auth.Strategy == config.AuthStrategyOpenshift {
+	switch conf.Auth.Strategy {
+
+	case config.AuthStrategyOpenshift:
 		performOpenshiftLogout(w, r)
+	case config.AuthStrategyLDAP:
+		// TODO:
 	}
 	RespondWithCode(w, http.StatusNoContent)
 }

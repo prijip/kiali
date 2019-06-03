@@ -91,10 +91,12 @@ const (
 	AuthStrategyOpenshift = "openshift"
 	AuthStrategyLogin     = "login"
 	AuthStrategyAnonymous = "anonymous"
+	AuthStrategyLDAP      = "ldap"
 
 	TokenCookieName             = "kiali-token"
 	AuthStrategyOpenshiftIssuer = "kiali-openshift"
 	AuthStrategyLoginIssuer     = "kiali-login"
+	AuthStrategyLDAPIssuer      = "kiali-ldap"
 )
 
 // the paths we expect the login secret to be located

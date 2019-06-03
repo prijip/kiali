@@ -88,7 +88,9 @@ func GetTokenClaimsIfValid(tokenString string) (*IanaClaims, error) {
 		if claims.Issuer == AuthStrategyOpenshiftIssuer && cfg.Auth.Strategy != AuthStrategyOpenshift {
 			return nil, errors.New("token is invalid because of authentication strategy mismatch")
 		}
-
+		if claims.Issuer == AuthStrategyLDAPIssuer && cfg.Auth.Strategy != AuthStrategyLDAP {
+			return nil, errors.New("token is invalid because of authentication strategy mismatch")
+		}
 		return token.Claims.(*IanaClaims), nil
 	}
 
